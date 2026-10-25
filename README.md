@@ -20,7 +20,7 @@ Clickle draws a click effect wherever you click, in any app, on every display, e
 | **Dash burst** | Two staggered rings of short dashes flying outward |
 | **Surprise me** | A random effect on every click |
 
-Color themes: **Neon** (default), Magic, Gold, Rainbow, Pink, Ice, or any custom color.
+Color themes: **Ice** (default), Neon, Magic, Gold, Rainbow, Pink, or any custom color.
 
 ## Requirements
 
@@ -82,7 +82,7 @@ Every change saves automatically and applies to your next click. Use **Preview �
 | Setting | Default | Options |
 |---|---|---|
 | Click effect | Firework | Any effect from the [table above](#effects) |
-| Colors | Neon | Neon, Magic, Gold, Rainbow, Pink, Ice, Custom |
+| Colors | Ice | Ice, Neon, Magic, Gold, Rainbow, Pink, Custom |
 | Custom color | `#FFD45A` | Any color, via the color picker (shown when Colors is Custom) |
 | Sparkle shape | Stars + dots | Stars + dots, Stars, Dots, Hearts (shown for Sparkles and Surprise me) |
 | Neon glow | On | Adds a glowing edge to Circle pop, Ripple rings, Light rays and Dash burst |
@@ -103,17 +103,38 @@ Color themes:
 
 | Setting | Default | Range | What it does |
 |---|---|---|---|
-| Amount | 30 | 10 – 150 | Number of sparks, sparkles, rays or dashes per click |
+| Amount | 24 | 10 – 150 | Number of sparks, sparkles, rays or dashes per click |
 | Size | 0.5× | 0.4× – 2.5× | Overall size of the effect |
 | Speed | 0.5× | 0.3× – 2.5× | How fast sparks fly out (and how fast shape effects play) |
 | Gravity | 1.0× | −1× – 3× | How strongly sparks fall. 0 = no fall, below 0 = float upward |
 | Duration | 0.5s | 0.3s – 2.5s | How long each effect lasts |
 
+### Trail
+
+| Setting | Default | Options |
+|---|---|---|
+| Trail | On drag | None, On drag, Always |
+
+*On drag* draws a trail while you drag with any mouse button; *Always* follows the cursor even when no button is pressed.
+
+The trail always matches your click effect and uses the same colors, size, speed, gravity, duration and Neon glow:
+
+| Click effect | Trail |
+|---|---|
+| Sparkles | Small sparkles in the same shape and colors |
+| Firework, Firework – willow, Firework – double ring | Mini sparks of that same firework |
+| Circle pop | No trail |
+| Ripple rings | No trail |
+| Light rays | One glowing line that tapers from the cursor and fades |
+| Dash burst | One line of dashes, the same length as the click's, alternating colors and fading behind the cursor |
+| Surprise me | Matches whichever effect played on the last click |
+
+If an effect has no trail (Circle pop, Ripple rings), the Trail option is greyed out and shows *None*.
+
 ### Triggers
 
 | Setting | Default | What it does |
 |---|---|---|
-| Sparkle trail while dragging | On | Leaves a trail of small sparkles while you drag with the left button |
 | Sparkle on right-click | On | Plays the effect on right- and middle-clicks too, not just left-clicks |
 
 ## Customizing the code
@@ -163,7 +184,7 @@ Change `10...150` to widen or narrow the range.
 | What | Where in `main.swift` |
 |---|---|
 | Menu-bar icon | `makeMenuBarIcon()` — draws the cursor and mini firework; or replace it with text: `statusItem.button?.title = "✨"` |
-| Drag-trail spacing | `>= 8` in `handle(_:)` — points the cursor must move between trail sparkles |
+| Trails | `Effect.trailStyle` maps each effect to its trail; `SmoothTrail` draws the line trails every frame, `trailPiece` drops the particle ones |
 | Firework spark speed, trail length, droop | The `spark(...)` calls in `makeFirework` (`velocity`, `ghosts`, `accel`) |
 | Shape-effect sizes | The radii (e.g. `28 * size`, `36 * size`) in `makeShapeEffect` |
 

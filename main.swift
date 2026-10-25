@@ -22,7 +22,26 @@ enum Effect: String, CaseIterable, Identifiable {
         }
     }
     var isFirework: Bool { [.firework, .willow, .doubleRing].contains(self) }
+
+    /// The trail drawn in this effect's style, or nil if it has none. Surprise me follows whichever effect played last.
+    var trailStyle: TrailStyle? {
+        switch self {
+        case .sparkles: .sparkles
+        case .firework, .willow, .doubleRing: .fireworks
+        case .circle: nil
+        case .ripple: nil
+        case .rays: .rays
+        case .dashes: .dashes
+        case .random: lastPlayed.trailStyle
+        }
+    }
 }
+
+/// The effect the last click actually played (differs from the setting when it's Surprise me).
+var lastPlayed = Effect.firework
+
+/// The click effect currently selected in Settings.
+func selectedEffect() -> Effect { Effect(rawValue: prefs.string(forKey: Key.effect) ?? "") ?? .firework }
 
 enum Theme: String, CaseIterable, Identifiable {
     case magic, neon, gold, rainbow, pink, ice, custom
@@ -53,17 +72,36 @@ enum Shape: String, CaseIterable, Identifiable {
     }
 }
 
+/// The trail that matches each click effect; `Effect.trailStyle` does the mapping.
+enum TrailStyle {
+    case sparkles, fireworks, rays, dashes
+    /// Smooth styles are redrawn every frame from the cursor's recent path; the others drop pieces as it moves.
+    var isSmooth: Bool { [.rays, .dashes].contains(self) }
+}
+
+enum TrailMode: String, CaseIterable, Identifiable {
+    case none, dragging, always
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .none: "None"
+        case .dragging: "On drag"
+        case .always: "Always"
+        }
+    }
+}
+
 enum Key {
     static let enabled = "enabled", effect = "effect", glow = "glow"
     static let theme = "theme", customColor = "customColor", shape = "shape"
     static let count = "count", size = "size", speed = "speed", gravity = "gravity", lifetime = "lifetime"
-    static let trail = "trail", rightClick = "rightClick"
+    static let trailMode = "trailMode", rightClick = "rightClick"
 }
 
 let defaultSettings: [String: Any] = [
-    Key.enabled: true, Key.effect: Effect.firework.rawValue, Key.glow: true, Key.theme: Theme.neon.rawValue, Key.customColor: "#FFD45A", Key.shape: Shape.mixed.rawValue,
-    Key.count: 30.0, Key.size: 0.5, Key.speed: 0.5, Key.gravity: 1.0, Key.lifetime: 0.5,
-    Key.trail: true, Key.rightClick: true,
+    Key.enabled: true, Key.effect: Effect.firework.rawValue, Key.glow: true, Key.theme: Theme.ice.rawValue, Key.customColor: "#FFD45A", Key.shape: Shape.mixed.rawValue,
+    Key.count: 24.0, Key.size: 0.5, Key.speed: 0.5, Key.gravity: 1.0, Key.lifetime: 0.5,
+    Key.trailMode: TrailMode.dragging.rawValue, Key.rightClick: true,
 ]
 
 let prefs = UserDefaults.standard
@@ -164,7 +202,7 @@ let heartImage = makeHeart()
 
 // MARK: - Particles
 
-/// Burst kind: a click explodes outward, a drag leaves a gentle trail.
+/// Burst kind: a click explodes outward, a drag leaves a small trail of sparks.
 enum Burst { case click, trail }
 
 /// Sprites tinted per color, cached so each burst reuses them.
@@ -186,15 +224,15 @@ func tinted(_ image: CGImage, _ name: String, _ color: NSColor) -> CGImage {
 
 /// Builds one layer per sparkle with its animation already attached.
 /// Directions are stratified around the full circle so every side gets the same share.
-func makeParticles(_ kind: Burst, at origin: CGPoint) -> (layers: [CALayer], maxLife: Double) {
+func makeParticles(at origin: CGPoint, trail: Bool = false) -> (layers: [CALayer], maxLife: Double) {
     let theme = Theme(rawValue: prefs.string(forKey: Key.theme) ?? "") ?? .magic
     let shape = Shape(rawValue: prefs.string(forKey: Key.shape) ?? "") ?? .mixed
     let size = prefs.double(forKey: Key.size)
     let speed = prefs.double(forKey: Key.speed)
     let gravity = -280 * prefs.double(forKey: Key.gravity) // layer y-axis points up
     let lifetime = prefs.double(forKey: Key.lifetime)
-    let count = kind == .click ? Int(prefs.double(forKey: Key.count)) : 4
-    let velocity = (kind == .click ? 260 : 50) * speed
+    let count = trail ? 3 : Int(prefs.double(forKey: Key.count))
+    let velocity = (trail ? 50 : 260) * speed
 
     // (image, name, share, base scale); a 96px sprite at 2x is 48pt at scale 1.
     let sprites: [(CGImage, String, Double, Double)] = switch shape {
@@ -365,7 +403,7 @@ func makeShapeEffect(_ effect: Effect, at origin: CGPoint) -> (layers: [CALayer]
 
 /// Sparks fly with air drag and gravity; each spark drags a few fading "ghost" copies
 /// along the same path a moment later, which reads as a glowing streak.
-func makeFirework(_ effect: Effect, at origin: CGPoint) -> (layers: [CALayer], maxLife: Double) {
+func makeFirework(_ effect: Effect, _ kind: Burst, at origin: CGPoint) -> (layers: [CALayer], maxLife: Double) {
     let theme = Theme(rawValue: prefs.string(forKey: Key.theme) ?? "") ?? .magic
     let palette = colors(for: theme).shuffled()
     let size = prefs.double(forKey: Key.size)
@@ -440,6 +478,19 @@ func makeFirework(_ effect: Effect, at origin: CGPoint) -> (layers: [CALayer], m
 
     let star = (starImage, "star"), dot = (dotImage, "dot")
 
+    if kind == .trail {
+        // Two small, slow sparks in this firework's style: willow droops with long trails, double ring uses its two ring colors.
+        let willow = effect == .willow
+        for i in 0..<2 {
+            spark(angle: .random(in: 0..<(2 * .pi)), velocity: (willow ? 45 : 60) * speed * .random(in: 0.6...1.1),
+                  life: (willow ? 1.4 : 0.7) * lifeScale * .random(in: 0.8...1.2),
+                  accel: (willow ? -260 : effect == .doubleRing ? -90 : -150) * gravity, color: palette[i % min(2, palette.count)],
+                  head: willow ? dot : star, scale: (willow ? 0.4 : 0.24) * size, ghosts: willow ? 4 : 2, ghostGap: 0.03,
+                  flicker: effect == .firework)
+        }
+        return (layers, maxLife + 0.1)
+    }
+
     switch effect {
     case .firework:
         // Classic peony: an even sphere of sparks in two alternating colors that twinkle out.
@@ -485,6 +536,165 @@ func makeFirework(_ effect: Effect, at origin: CGPoint) -> (layers: [CALayer], m
     return (layers, maxLife + 0.1)
 }
 
+// MARK: - Trails
+
+/// Smooth trails for the shape effects, drawn from the cursor's recent path and redrawn every frame
+/// so the tail fades and glides back into the cursor once it stops:
+/// Light rays → one tapered ray, Dash burst → one line of dashes.
+final class SmoothTrail {
+    private struct Sample { let p: CGPoint; let t: CFTimeInterval; let d: CGFloat } // d: distance travelled along the trail
+    private typealias Point = (p: CGPoint, age: CGFloat, d: CGFloat)
+    private var samples: [Sample] = []
+    private weak var window: OverlayWindow?
+    private var timer: Timer?
+    private let root = CALayer()
+    private var style: TrailStyle = .rays
+    private var built: TrailStyle?
+    private var palette: [NSColor] = []
+    private var paletteKey = "" // theme + custom color the palette was built from
+    var breakNext = false // set on mouse down so a new drag starts a fresh trail
+
+    /// Records a new cursor position (global coordinates).
+    func add(_ p: NSPoint, in w: OverlayWindow, style: TrailStyle) {
+        self.style = style
+        let local = CGPoint(x: p.x - w.frame.minX, y: p.y - w.frame.minY)
+        let step = samples.last.map { hypot($0.p.x - local.x, $0.p.y - local.y) } ?? 0
+        if w !== window || step > 150 || breakNext { restart(in: w) }
+        if !samples.isEmpty, step < 2 { return }
+        samples.append(Sample(p: local, t: CACurrentMediaTime(), d: (samples.last?.d ?? 0) + (samples.isEmpty ? 0 : step)))
+        if timer == nil {
+            let t = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.tick() }
+            RunLoop.main.add(t, forMode: .common)
+            timer = t
+        }
+    }
+
+    private func restart(in w: OverlayWindow) {
+        breakNext = false
+        samples = []
+        window = w
+        root.removeFromSuperlayer()
+        guard let host = w.contentView?.layer else { return }
+        root.frame = host.bounds
+        host.addSublayer(root)
+    }
+
+    /// Picks up color changes from Settings every frame — with Trail set to Always, a trail may never restart.
+    private func refreshPalette() {
+        let theme = prefs.string(forKey: Key.theme) ?? "", key = theme + (prefs.string(forKey: Key.customColor) ?? "")
+        guard key != paletteKey else { return }
+        paletteKey = key
+        palette = Array(colors(for: Theme(rawValue: theme) ?? .ice).shuffled().prefix(3))
+        while palette.count < 3 { palette.append(palette[0]) }
+    }
+
+    private func tick() {
+        refreshPalette()
+        let now = CACurrentMediaTime(), length = max(0.3, prefs.double(forKey: Key.lifetime) * 1.2)
+        samples.removeAll { now - $0.t > length }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        if samples.count < 2 {
+            root.sublayers?.forEach { $0.isHidden = true }
+            if samples.isEmpty {
+                timer?.invalidate()
+                timer = nil
+            }
+        } else {
+            if built != style { rebuild() }
+            let points = smoothed(now: now, length: length)
+            drawLines(points)
+        }
+        CATransaction.commit()
+    }
+
+    /// Path points from tail to head with their age (0 = newest, 1 = about to vanish), rounded off with Chaikin smoothing.
+    private func smoothed(now: CFTimeInterval, length: Double) -> [Point] {
+        var pts: [Point] = samples.map { ($0.p, CGFloat(min(1, (now - $0.t) / length)), $0.d) }
+        func mix(_ a: Point, _ b: Point, _ k: CGFloat) -> Point {
+            (CGPoint(x: a.p.x * (1 - k) + b.p.x * k, y: a.p.y * (1 - k) + b.p.y * k), a.age * (1 - k) + b.age * k, a.d * (1 - k) + b.d * k)
+        }
+        for _ in 0..<2 where pts.count > 2 {
+            var out = [pts[0]]
+            for i in 0..<(pts.count - 1) {
+                out.append(mix(pts[i], pts[i + 1], 0.25))
+                out.append(mix(pts[i], pts[i + 1], 0.75))
+            }
+            out.append(pts[pts.count - 1])
+            pts = out
+        }
+        return pts
+    }
+
+    /// Unit normal at point `i`, from its neighbours' direction.
+    private func normal(_ pts: [Point], _ i: Int) -> CGPoint {
+        let a = pts[max(i - 1, 0)].p, b = pts[min(i + 1, pts.count - 1)].p
+        let dx = b.x - a.x, dy = b.y - a.y, len = max(hypot(dx, dy), 0.001)
+        return CGPoint(x: -dy / len, y: dx / len)
+    }
+
+    private var lineWidth: CGFloat { 3 * max(0.7, prefs.double(forKey: Key.size)) } // same as the shape effects
+
+    private func applyGlow(_ l: CALayer, radius: CGFloat) {
+        l.shadowOffset = .zero
+        l.shadowRadius = radius
+        l.shadowOpacity = prefs.bool(forKey: Key.glow) ? 1 : 0
+    }
+
+    private func rebuild() {
+        root.sublayers = nil
+        built = style
+        // Up to 2 lines × 8 segments; each segment fades a little more toward the tail.
+        for _ in 0..<16 {
+            let l = CAShapeLayer()
+            l.fillColor = nil
+            l.lineCap = style == .dashes ? .butt : .round
+            l.lineJoin = .round
+            root.addSublayer(l)
+        }
+    }
+
+    /// Light rays and Dash burst: lines that follow the cursor and fade toward the tail.
+    private func drawLines(_ pts: [Point]) {
+        guard let layers = root.sublayers, layers.count == 16 else { return }
+        let w = lineWidth
+        // Perpendicular offset of each line from the cursor's path.
+        let offsets: [CGFloat] = switch style {
+        case .dashes: [0, 0] // two interleaved layers on one line, so the dashes alternate colors
+        default: [0]
+        }
+        let normals = pts.indices.map { normal(pts, $0) }
+        // Dashes as long as the click effect's (8 × Size); each layer draws every other one.
+        let dashLength = 8 * prefs.double(forKey: Key.size), gap = dashLength * 0.8
+        let dash = [dashLength, gap * 2 + dashLength].map { NSNumber(value: Double($0)) }
+
+        for (line, layerIndex) in (0..<2).map({ ($0, $0 * 8) }) {
+            for seg in 0..<8 {
+                let l = layers[layerIndex + seg] as! CAShapeLayer
+                let from = pts.count * seg / 8, to = min(pts.count - 1, pts.count * (seg + 1) / 8 + 1)
+                guard line < offsets.count, to > from else { l.isHidden = true; continue }
+                let o = offsets[line]
+                let path = CGMutablePath()
+                path.addLines(between: (from...to).map {
+                    CGPoint(x: pts[$0].p.x + normals[$0].x * o, y: pts[$0].p.y + normals[$0].y * o)
+                })
+                let age = pts[(from + to) / 2].age
+                let color = palette[line]
+                l.path = path
+                l.strokeColor = color.withAlphaComponent(1 - age).cgColor
+                // Rays taper from a bold head to a fine tail; dashes keep the click dashes' width.
+                l.lineWidth = style == .rays ? w * 1.6 * (1 - 0.75 * age) : style == .dashes ? w * 0.8 : w
+                l.lineDashPattern = style == .dashes ? dash : nil
+                // Dashes stay put as the trail moves; the second layer is shifted one dash + gap along.
+                l.lineDashPhase = style == .dashes ? pts[from].d + CGFloat(line) * (dashLength + gap) : 0
+                l.shadowColor = color.cgColor
+                applyGlow(l, radius: 7)
+                l.isHidden = false
+            }
+        }
+    }
+}
+
 // MARK: - Overlay window (one per display)
 
 final class OverlayWindow: NSWindow {
@@ -507,27 +717,40 @@ final class OverlayWindow: NSWindow {
     override var canBecomeKey: Bool { false }
     override var canBecomeMain: Bool { false }
 
-    /// `point` is in global screen coordinates (bottom-left origin).
-    func sparkle(at point: NSPoint, _ kind: Burst) {
-        guard let root = contentView?.layer else { return }
-        let origin = CGPoint(x: point.x - frame.minX, y: point.y - frame.minY)
-        var effect = Effect(rawValue: prefs.string(forKey: Key.effect) ?? "") ?? .firework
+    /// Plays the click effect. `point` is in global screen coordinates (bottom-left origin).
+    func sparkle(at point: NSPoint) {
+        var effect = selectedEffect()
         if effect == .random { effect = Effect.allCases.filter { $0 != .random }.randomElement()! }
-        // Drag trails are always small sparkles; the chosen effect plays on clicks.
-        let (layers, maxLife) = kind == .trail || effect == .sparkles ? makeParticles(kind, at: origin)
-            : effect.isFirework ? makeFirework(effect, at: origin)
+        lastPlayed = effect
+        let origin = local(point)
+        let (layers, maxLife) = effect.isFirework ? makeFirework(effect, .click, at: origin)
+            : effect == .sparkles ? makeParticles(at: origin)
             : makeShapeEffect(effect, at: origin)
+        show(layers, for: maxLife)
+    }
 
-        let burst = CALayer()
-        burst.frame = root.bounds
-        layers.forEach(burst.addSublayer)
+    /// Drops one trail piece at a global point: small sparkles or sparks of the effect that's playing.
+    func trailPiece(at point: NSPoint) {
+        let effect = selectedEffect() == .random ? lastPlayed : selectedEffect()
+        let (layers, maxLife) = effect.isFirework ? makeFirework(effect, .trail, at: local(point))
+            : makeParticles(at: local(point), trail: true)
+        show(layers, for: maxLife)
+    }
+
+    private func local(_ p: NSPoint) -> CGPoint { CGPoint(x: p.x - frame.minX, y: p.y - frame.minY) }
+
+    private func show(_ layers: [CALayer], for duration: Double) {
+        guard let root = contentView?.layer else { return }
+        let group = CALayer()
+        group.frame = root.bounds
+        layers.forEach(group.addSublayer)
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        root.addSublayer(burst)
+        root.addSublayer(group)
         CATransaction.commit()
 
-        DispatchQueue.main.asyncAfter(deadline: .now() + maxLife + 0.1) { burst.removeFromSuperlayer() }
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.1) { group.removeFromSuperlayer() }
     }
 }
 
@@ -548,15 +771,15 @@ struct SettingsView: View {
     @AppStorage(Key.enabled) var enabled = true
     @AppStorage(Key.effect) var effect = Effect.firework.rawValue
     @AppStorage(Key.glow) var glow = true
-    @AppStorage(Key.theme) var theme = Theme.neon.rawValue
+    @AppStorage(Key.theme) var theme = Theme.ice.rawValue
     @AppStorage(Key.customColor) var customColor = "#FFD45A"
     @AppStorage(Key.shape) var shape = Shape.mixed.rawValue
-    @AppStorage(Key.count) var count = 30.0
+    @AppStorage(Key.count) var count = 24.0
     @AppStorage(Key.size) var size = 0.5
     @AppStorage(Key.speed) var speed = 0.5
     @AppStorage(Key.gravity) var gravity = 1.0
     @AppStorage(Key.lifetime) var lifetime = 0.5
-    @AppStorage(Key.trail) var trail = true
+    @AppStorage(Key.trailMode) var trailMode = TrailMode.dragging.rawValue
     @AppStorage(Key.rightClick) var rightClick = true
     @StateObject var login = LoginItem()
 
@@ -595,8 +818,21 @@ struct SettingsView: View {
                 slider("Gravity", $gravity, -1...3, "%.1f×")
                 slider("Duration", $lifetime, 0.3...2.5, "%.1fs")
             }
+            Section {
+                // The trail always matches the click effect; effects without one show None, greyed out.
+                let hasTrail = Effect(rawValue: effect) == .random || Effect(rawValue: effect)?.trailStyle != nil
+                Picker("Trail", selection: Binding(get: { hasTrail ? trailMode : TrailMode.none.rawValue },
+                                                   set: { trailMode = $0 })) {
+                    ForEach(TrailMode.allCases) { Text($0.label).tag($0.rawValue) }
+                }
+                .pickerStyle(.segmented)
+                .disabled(!hasTrail)
+            } footer: {
+                Text("The trail matches your click effect and settings.")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             Section("Triggers") {
-                Toggle("Sparkle trail while dragging", isOn: $trail)
                 Toggle("Sparkle on right-click", isOn: $rightClick)
             }
             Section {
@@ -610,8 +846,7 @@ struct SettingsView: View {
             }
         }
         .formStyle(.grouped)
-        .frame(width: 400)
-        .fixedSize()
+        .frame(width: 420, height: 640)
     }
 
     func slider(_ title: String, _ value: Binding<Double>, _ range: ClosedRange<Double>, _ fmt: String) -> some View {
@@ -684,6 +919,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var settingsWindow: NSWindow?
     var toggleItem: NSMenuItem!
     var lastTrail = NSPoint.zero
+    let smoothTrail = SmoothTrail()
 
     func applicationDidFinishLaunching(_ note: Notification) {
         prefs.register(defaults: defaultSettings)
@@ -693,7 +929,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         // Global monitors see clicks in other apps; local ones see clicks in our own windows.
         // Mouse events don't require Accessibility permission.
-        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown, .leftMouseDragged]
+        let mask: NSEvent.EventTypeMask = [.leftMouseDown, .rightMouseDown, .otherMouseDown,
+                                           .leftMouseDragged, .rightMouseDragged, .otherMouseDragged, .mouseMoved]
         if let m = NSEvent.addGlobalMonitorForEvents(matching: mask, handler: { [weak self] e in self?.handle(e) }) {
             monitors.append(m)
         }
@@ -710,24 +947,108 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         windows.forEach { $0.orderFrontRegardless() }
     }
 
-    func sparkle(at p: NSPoint, _ kind: Burst) {
-        windows.first(where: { NSMouseInRect(p, $0.frame, false) })?.sparkle(at: p, kind)
+    func window(at p: NSPoint) -> OverlayWindow? {
+        windows.first(where: { NSMouseInRect(p, $0.frame, false) })
+    }
+
+    /// Where the event happened, in global bottom-left coordinates. Uses the position recorded with the event
+    /// rather than where the mouse is by the time we handle it, which can be a few points further along.
+    func location(of event: NSEvent) -> NSPoint {
+        guard let cg = event.cgEvent?.location, let primary = NSScreen.screens.first else { return NSEvent.mouseLocation }
+        let shift = centeredCursorShift()
+        return NSPoint(x: cg.x + shift.dx, y: primary.frame.maxY - cg.y + shift.dy) // CoreGraphics measures from the top
+    }
+
+    private var cursorShifts: [String: CGVector] = [:]
+
+    /// Small nudges from macOS's hotspot so effects look centered on the cursor: on screen the text I-beam's hotspot
+    /// sits 1.25 pt right of and 0.25 pt below the bar's center (measured from screenshots), and the pointing hand's
+    /// sits 1 pt inside the fingertip, the zoom magnifiers' sits 0.5 pt right of and below the lens center, and the arrow's sits 0.375 pt right of and 0.15 pt above its black tip.
+    /// Other cursors (crosshairs, resize arrows...) use their exact hotspot.
+    func centeredCursorShift() -> CGVector {
+        guard let cursor = NSCursor.currentSystem else { return .zero }
+        let image = cursor.image, hot = cursor.hotSpot // hotspot is measured from the image's top-left
+        let key = "\(image.size)\(hot)"
+        if let known = cursorShifts[key] { return known }
+
+        // The pointing hand's hotspot is 1 pt below its fingertip; nudge up toward the tip and a touch left.
+        let hand = NSCursor.pointingHand
+        if image.size == hand.image.size && hot == hand.hotSpot {
+            cursorShifts[key] = CGVector(dx: -1, dy: 0.75)
+            return CGVector(dx: -1, dy: 0.75)
+        }
+
+        // The zoom-in and zoom-out magnifiers: measured on screen, the lens center is 0.5 pt left of and above the hotspot.
+        for zoom in [NSCursor.zoomIn, NSCursor.zoomOut] where image.size == zoom.image.size && hot == zoom.hotSpot {
+            cursorShifts[key] = CGVector(dx: -0.5, dy: 0.5)
+            return CGVector(dx: -0.5, dy: 0.5)
+        }
+
+        var shift = CGVector.zero
+        if let cg = image.cgImage(forProposedRect: nil, context: nil, hints: nil),
+           let ctx = CGContext(data: nil, width: cg.width, height: cg.height, bitsPerComponent: 8, bytesPerRow: 0,
+                               space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue),
+           let data = ctx.data?.assumingMemoryBound(to: UInt8.self) {
+            ctx.draw(cg, in: CGRect(x: 0, y: 0, width: cg.width, height: cg.height))
+            // Recognize the I-beam (hotspot in the middle of a drawing much taller than it is wide)
+            // and the arrow (hotspot at the drawing's top-left corner).
+            // Bounding box of the solid part of the drawing (skipping its faint drop shadow); rows run top to bottom.
+            var minX = cg.width, maxX = -1, minY = cg.height, maxY = -1
+            for y in 0..<cg.height {
+                for x in 0..<cg.width where data[y * ctx.bytesPerRow + x * 4 + 3] > 128 {
+                    minX = min(minX, x); maxX = max(maxX, x); minY = min(minY, y); maxY = max(maxY, y)
+                }
+            }
+            if maxX >= 0 {
+                let scale = CGFloat(cg.width) / image.size.width
+                let center = CGPoint(x: CGFloat(minX + maxX + 1) / 2 / scale, y: CGFloat(minY + maxY + 1) / 2 / scale)
+                let half = CGSize(width: CGFloat(maxX - minX + 1) / 2 / scale, height: CGFloat(maxY - minY + 1) / 2 / scale)
+                let centered = abs(hot.x - center.x) < half.width / 2 && abs(hot.y - center.y) < half.height / 2
+                let topLeft = CGPoint(x: CGFloat(minX) / scale, y: CGFloat(minY) / scale)
+                if centered && half.height > half.width * 1.5 {
+                    shift = CGVector(dx: -1.25, dy: 0.25) // measured on screen: the bar's center, in bottom-left coordinates
+                } else if abs(hot.x - topLeft.x) < 3 && abs(hot.y - topLeft.y) < 3 {
+                    shift = CGVector(dx: -0.375, dy: -0.15) // the arrow: measured on screen, onto its black tip
+                }
+            }
+        }
+        cursorShifts[key] = shift
+        return shift
     }
 
     func handle(_ event: NSEvent) {
         guard prefs.bool(forKey: Key.enabled) else { return }
-        let p = NSEvent.mouseLocation
+        let p = location(of: event)
 
         switch event.type {
-        case .leftMouseDragged:
-            guard prefs.bool(forKey: Key.trail), hypot(p.x - lastTrail.x, p.y - lastTrail.y) >= 8 else { return }
-            sparkle(at: p, .trail)
+        case .mouseMoved:
+            if prefs.string(forKey: Key.trailMode) == TrailMode.always.rawValue { trail(to: p) }
+        case .leftMouseDragged, .rightMouseDragged, .otherMouseDragged:
+            trail(to: p)
         case .rightMouseDown, .otherMouseDown:
-            guard prefs.bool(forKey: Key.rightClick) else { return }
-            sparkle(at: p, .click)
+            if prefs.bool(forKey: Key.rightClick) { window(at: p)?.sparkle(at: p) }
+            startTrail(at: p)
         default:
-            sparkle(at: p, .click)
+            window(at: p)?.sparkle(at: p)
+            startTrail(at: p)
         }
+    }
+
+    /// A click starts a fresh trail, so a new drag doesn't connect to the last one.
+    func startTrail(at p: NSPoint) {
+        lastTrail = p
+        if prefs.string(forKey: Key.trailMode) == TrailMode.dragging.rawValue { smoothTrail.breakNext = true }
+    }
+
+    /// Feeds the cursor position to the trail, drawn in the selected effect's style. Smooth styles take every move;
+    /// the particle styles drop a piece every few points.
+    func trail(to p: NSPoint) {
+        guard prefs.string(forKey: Key.trailMode) != TrailMode.none.rawValue,
+              let style = selectedEffect().trailStyle, let w = window(at: p) else { return }
+        if style.isSmooth { return smoothTrail.add(p, in: w, style: style) }
+
+        guard hypot(p.x - lastTrail.x, p.y - lastTrail.y) >= 10 else { return }
+        w.trailPiece(at: p)
         lastTrail = p
     }
 
@@ -758,7 +1079,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let view = SettingsView { [weak self] in
                 guard let self, let w = self.settingsWindow else { return }
                 // Sparkle just above the settings window so it isn't hidden behind it.
-                self.sparkle(at: NSPoint(x: w.frame.midX, y: w.frame.maxY + 60), .click)
+                let p = NSPoint(x: w.frame.midX, y: w.frame.maxY + 60)
+                self.window(at: p)?.sparkle(at: p)
             }
             let w = NSWindow(contentViewController: NSHostingController(rootView: view))
             w.title = "Clickle Settings"
