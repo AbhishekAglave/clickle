@@ -629,6 +629,54 @@ struct SettingsView: View {
 
 // MARK: - App
 
+/// Menu-bar icon: a cursor clicking into a tiny version of the default Firework effect — star-tipped sparks
+/// with dotted trails. Template image, so macOS tints it for light and dark menu bars.
+func makeMenuBarIcon() -> NSImage {
+    let image = NSImage(size: NSSize(width: 18, height: 18), flipped: true) { _ in
+        NSColor.black.setFill()
+        let tip = NSPoint(x: 7.9, y: 8.3)
+
+        func dot(_ c: NSPoint, _ r: CGFloat) {
+            NSBezierPath(ovalIn: NSRect(x: c.x - r, y: c.y - r, width: 2 * r, height: 2 * r)).fill()
+        }
+        func star(_ c: NSPoint, _ r: CGFloat) {
+            let w = r * 0.22
+            let p = NSBezierPath()
+            p.move(to: NSPoint(x: c.x, y: c.y - r))
+            p.curve(to: NSPoint(x: c.x + r, y: c.y), controlPoint1: NSPoint(x: c.x + w, y: c.y - w), controlPoint2: NSPoint(x: c.x + w, y: c.y - w))
+            p.curve(to: NSPoint(x: c.x, y: c.y + r), controlPoint1: NSPoint(x: c.x + w, y: c.y + w), controlPoint2: NSPoint(x: c.x + w, y: c.y + w))
+            p.curve(to: NSPoint(x: c.x - r, y: c.y), controlPoint1: NSPoint(x: c.x - w, y: c.y + w), controlPoint2: NSPoint(x: c.x - w, y: c.y + w))
+            p.curve(to: NSPoint(x: c.x, y: c.y - r), controlPoint1: NSPoint(x: c.x - w, y: c.y - w), controlPoint2: NSPoint(x: c.x - w, y: c.y - w))
+            p.fill()
+        }
+
+        // Sparks fan out where the cursor body isn't (it points down-right), drooping slightly with gravity.
+        for (i, degrees) in [180.0, 225, 270, 315, 0, 135].enumerated() {
+            let a = degrees * .pi / 180
+            let long = i.isMultiple(of: 2) == false
+            let reach: CGFloat = long ? 6 : 5
+            func point(_ s: CGFloat) -> NSPoint {
+                NSPoint(x: tip.x + cos(a) * reach * s, y: tip.y + sin(a) * reach * s + 0.6 * s * s)
+            }
+            dot(point(0.42), 0.5)
+            dot(point(0.66), 0.65)
+            star(point(1), long ? 1.9 : 1.55)
+        }
+
+        let u: CGFloat = 0.5
+        let arrow: [(CGFloat, CGFloat)] = [(0, 0), (0, 17), (4, 13), (7, 19.5), (9.6, 18.4), (6.7, 12), (12, 12)]
+        let cursor = NSBezierPath()
+        cursor.move(to: tip)
+        arrow.dropFirst().forEach { cursor.line(to: NSPoint(x: tip.x + $0.0 * u, y: tip.y + $0.1 * u)) }
+        cursor.close()
+        cursor.fill()
+        return true
+    }
+    image.isTemplate = true
+    return image
+}
+
+
 final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     var windows: [OverlayWindow] = []
     var monitors: [Any] = []
@@ -685,7 +733,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func setupStatusItem() {
         statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        statusItem.button?.title = "✨"
+        statusItem.button?.image = makeMenuBarIcon()
 
         let menu = NSMenu()
         menu.delegate = self

@@ -1,3 +1,5 @@
+<p align="center"><img src="icon/icon-1024.png" width="160" alt="Clickle icon"></p>
+
 # Clickle ✨
 
 Fireworks, sparkles and neon ripples on every mouse click — a tiny macOS menu-bar app.
@@ -52,13 +54,13 @@ mv Clickle.app /Applications/
 open /Applications/Clickle.app
 ```
 
-A ✨ icon appears in the menu bar. There's no Dock icon — Clickle lives only in the menu bar.
+A small cursor-and-firework icon appears in the menu bar. There's no Dock icon — Clickle lives only in the menu bar.
 
 No permissions are needed: Clickle only watches mouse clicks, which macOS allows without Accessibility access.
 
 ## Using it
 
-Click the ✨ in the menu bar:
+Click the Clickle icon in the menu bar:
 
 - **Clickle On** — turn effects on or off
 - **Settings…** (⌘,) — pick the effect and colors, and tune it
@@ -120,7 +122,7 @@ Everything lives in [`main.swift`](main.swift). After any change, rebuild and re
 
 ```sh
 ./build-app.sh
-# quit Clickle from the ✨ menu, then:
+# quit Clickle from the menu-bar icon, then:
 open Clickle.app
 ```
 
@@ -160,16 +162,29 @@ Change `10...150` to widen or narrow the range.
 
 | What | Where in `main.swift` |
 |---|---|
-| Menu-bar icon | `statusItem.button?.title = "✨"` — any emoji or text |
+| Menu-bar icon | `makeMenuBarIcon()` — draws the cursor and mini firework; or replace it with text: `statusItem.button?.title = "✨"` |
 | Drag-trail spacing | `>= 8` in `handle(_:)` — points the cursor must move between trail sparkles |
 | Firework spark speed, trail length, droop | The `spark(...)` calls in `makeFirework` (`velocity`, `ghosts`, `accel`) |
 | Shape-effect sizes | The radii (e.g. `28 * size`, `36 * size`) in `makeShapeEffect` |
+
+### Change the app icon
+
+The icon is drawn in code by [`icon/make-icon.swift`](icon/make-icon.swift): the background, the firework rays, the sparkle stars and the cursor are each a short, commented section. After editing it, regenerate the icon and rebuild:
+
+```sh
+./icon/build-icon.sh   # writes icon/AppIcon.icns and icon/icon-1024.png
+./build-app.sh
+```
+
+To use your own image instead, put a 1024×1024 PNG at `icon/icon-1024.png`, delete the `swift make-icon.swift` line from `icon/build-icon.sh`, and run the two commands above.
+
+If Finder or the Dock still shows the old icon, run `touch /Applications/Clickle.app` or log out and back in. macOS caches icons.
 
 ### How the build works
 
 `build-app.sh`:
 
-1. Compiles `main.swift` with `swiftc` into `Clickle.app/Contents/MacOS/Clickle`.
+1. Compiles `main.swift` with `swiftc` into `Clickle.app/Contents/MacOS/Clickle`, and copies `icon/AppIcon.icns` into `Clickle.app/Contents/Resources/`.
 2. Writes `Clickle.app/Contents/Info.plist` — the app's name, ID (`com.local.clickle`), minimum macOS version, and `LSUIElement`, which hides the Dock icon.
 3. Signs the app with a local (ad-hoc) signature so macOS will run it and allow Launch at login.
 
@@ -183,7 +198,7 @@ git pull
 ./build-app.sh
 ```
 
-Then quit Clickle from the ✨ menu and replace the old copy:
+Then quit Clickle from the menu-bar icon and replace the old copy:
 
 ```sh
 rm -rf /Applications/Clickle.app
@@ -193,7 +208,7 @@ open /Applications/Clickle.app
 
 ## Uninstall
 
-1. Quit Clickle from the ✨ menu.
+1. Quit Clickle from the menu-bar icon.
 2. Delete the app: `rm -rf /Applications/Clickle.app`
 3. Remove its saved settings: `defaults delete com.local.clickle`
 4. If you turned on Launch at login, also check System Settings → General → Login Items & Extensions.
@@ -201,5 +216,5 @@ open /Applications/Clickle.app
 ## Troubleshooting
 
 - **`xcrun: error: invalid active developer path`** — the Command Line Tools aren't installed. Run `xcode-select --install`.
-- **No ✨ in the menu bar** — on a crowded menu bar it can be hidden behind the notch. Quit a few other menu-bar apps, or check that Clickle is running in Activity Monitor.
+- **No Clickle icon in the menu bar** — on a crowded menu bar it can be hidden behind the notch. Quit a few other menu-bar apps, or check that Clickle is running in Activity Monitor.
 - **Launch at login doesn't stick** — move `Clickle.app` into `/Applications` first, then toggle it again.
