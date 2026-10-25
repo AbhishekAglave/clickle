@@ -218,3 +218,49 @@ open /Applications/Clickle.app
 - **`xcrun: error: invalid active developer path`** — the Command Line Tools aren't installed. Run `xcode-select --install`.
 - **No Clickle icon in the menu bar** — on a crowded menu bar it can be hidden behind the notch. Quit a few other menu-bar apps, or check that Clickle is running in Activity Monitor.
 - **Launch at login doesn't stick** — move `Clickle.app` into `/Applications` first, then toggle it again.
+
+## Contributing
+
+Contributions are welcome. New effects, color themes, fixes and ideas are all fair game.
+
+1. **Fork** this repo on GitHub and clone your fork:
+
+   ```sh
+   git clone https://github.com/<your-username>/clickle.git
+   cd clickle
+   ```
+
+2. **Create a branch** for your change:
+
+   ```sh
+   git checkout -b my-new-effect
+   ```
+
+3. **Make your change and try it out.** Quit any running Clickle first, then:
+
+   ```sh
+   ./build-app.sh && open Clickle.app
+   ```
+
+   Use **Preview ✨** in Settings to check your change, and try it on both light and dark wallpapers.
+
+4. **Commit, push and open a pull request** against `main`. Say what you changed, and add a screen recording or GIF if it's visual.
+
+A few guidelines:
+
+- Keep it simple. The whole app is one file, `main.swift`, built with plain `swiftc` (no Xcode project, no dependencies). Please keep it that way.
+- Match the style of the surrounding code.
+- If you add or change a setting, update the tables in this README too.
+
+Ideas to get started:
+
+- A new effect, such as confetti, hearts or a lightning bolt
+- A new color theme
+- Click sounds (with an on/off setting)
+- Different effects for left and right clicks
+
+Found a bug or have an idea but no time to build it? [Open an issue](https://github.com/AbhishekAglave/clickle/issues).
+
+## License
+
+[MIT](LICENSE). Use it, change it, share it.
