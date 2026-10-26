@@ -561,6 +561,7 @@ final class SmoothTrail {
         let step = samples.last.map { hypot($0.p.x - local.x, $0.p.y - local.y) } ?? 0
         if w !== window || step > 150 || breakNext { restart(in: w) }
         if !samples.isEmpty, step < 2 { return }
+        w.hold(for: max(0.3, prefs.double(forKey: Key.lifetime) * 1.2) + 0.1) // keep the window up while the tail fades
         samples.append(Sample(p: local, t: CACurrentMediaTime(), d: (samples.last?.d ?? 0) + (samples.isEmpty ? 0 : step)))
         if timer == nil {
             let t = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in self?.tick() }
@@ -707,7 +708,9 @@ final class OverlayWindow: NSWindow {
         ignoresMouseEvents = true
         isReleasedWhenClosed = false
         level = .screenSaver // above the menu bar, Dock and full-screen apps
-        collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .stationary, .ignoresCycle]
+        // Not on all Spaces: the window is only shown while something plays, on the Space in use at the time,
+        // so other Spaces, their Mission Control previews and full-screen transitions never see it.
+        collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary, .stationary, .ignoresCycle] // stationary: Mission Control leaves it in place
 
         let view = NSView(frame: NSRect(origin: .zero, size: screen.frame.size))
         view.wantsLayer = true
@@ -750,7 +753,23 @@ final class OverlayWindow: NSWindow {
         root.addSublayer(group)
         CATransaction.commit()
 
+        hold(for: duration + 0.1)
         DispatchQueue.main.asyncAfter(deadline: .now() + duration + 0.1) { group.removeFromSuperlayer() }
+    }
+
+    private var visibleUntil = 0.0
+
+    /// Shows the window on the current Space for at least `seconds`, then hides it once nothing is playing.
+    func hold(for seconds: Double) {
+        visibleUntil = max(visibleUntil, CACurrentMediaTime() + seconds)
+        if !isVisible || !isOnActiveSpace {
+            orderOut(nil)
+            orderFrontRegardless()
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + seconds + 0.05) { [weak self] in
+            guard let self, CACurrentMediaTime() >= self.visibleUntil else { return }
+            self.orderOut(nil)
+        }
     }
 }
 
@@ -943,8 +962,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc func buildWindows() {
         windows.forEach { $0.orderOut(nil) }
-        windows = NSScreen.screens.map { OverlayWindow(screen: $0) }
-        windows.forEach { $0.orderFrontRegardless() }
+        windows = NSScreen.screens.map { OverlayWindow(screen: $0) } // shown only while an effect plays
     }
 
     func window(at p: NSPoint) -> OverlayWindow? {
